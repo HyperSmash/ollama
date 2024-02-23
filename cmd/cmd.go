@@ -688,13 +688,22 @@ func generate(cmd *cobra.Command, opts runOptions) error {
 func RunServer(cmd *cobra.Command, _ []string) error {
 	host, port, err := net.SplitHostPort(strings.Trim(os.Getenv("OLLAMA_HOST"), "\"'"))
 	if err != nil {
-		host, port = "127.0.0.1", "11434"
+		host = "127.0.0.1"
+		port, err = cmd.Flags().GetString("port")
+		if err != nil {
+			port = "11434"
+		}
 		if ip := net.ParseIP(strings.Trim(os.Getenv("OLLAMA_HOST"), "[]")); ip != nil {
 			host = ip.String()
 		}
 	}
 
-	if err := initializeKeypair(); err != nil {
+	rootfs, err := cmd.Flags().GetString("rootfs")
+	if err != nil {
+		return err
+	}
+
+	if err := initializeKeypair(rootfs); err != nil {
 		return err
 	}
 
@@ -703,19 +712,14 @@ func RunServer(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	return server.Serve(ln)
+	return server.Serve(ln, rootfs)
 }
 
-func initializeKeypair() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
+func initializeKeypair(rootfs string) error {
+	privKeyPath := filepath.Join(rootfs, ".ollama", "id_ed25519")
+	pubKeyPath := filepath.Join(rootfs, ".ollama", "id_ed25519.pub")
 
-	privKeyPath := filepath.Join(home, ".ollama", "id_ed25519")
-	pubKeyPath := filepath.Join(home, ".ollama", "id_ed25519.pub")
-
-	_, err = os.Stat(privKeyPath)
+	_, err := os.Stat(privKeyPath)
 	if os.IsNotExist(err) {
 		fmt.Printf("Couldn't find '%s'. Generating new private key.\n", privKeyPath)
 		_, privKey, err := ed25519.GenerateKey(rand.Reader)
@@ -838,43 +842,6 @@ func NewCLI() *cobra.Command {
 
 	rootCmd.Flags().BoolP("version", "v", false, "Show version information")
 
-	createCmd := &cobra.Command{
-		Use:     "create MODEL",
-		Short:   "Create a model from a Modelfile",
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    CreateHandler,
-	}
-
-	createCmd.Flags().StringP("file", "f", "Modelfile", "Name of the Modelfile (default \"Modelfile\")")
-
-	showCmd := &cobra.Command{
-		Use:     "show MODEL",
-		Short:   "Show information for a model",
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    ShowHandler,
-	}
-
-	showCmd.Flags().Bool("license", false, "Show license of a model")
-	showCmd.Flags().Bool("modelfile", false, "Show Modelfile of a model")
-	showCmd.Flags().Bool("parameters", false, "Show parameters of a model")
-	showCmd.Flags().Bool("template", false, "Show template of a model")
-	showCmd.Flags().Bool("system", false, "Show system message of a model")
-
-	runCmd := &cobra.Command{
-		Use:     "run MODEL [PROMPT]",
-		Short:   "Run a model",
-		Args:    cobra.MinimumNArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    RunHandler,
-	}
-
-	runCmd.Flags().Bool("verbose", false, "Show timings for response")
-	runCmd.Flags().Bool("insecure", false, "Use an insecure registry")
-	runCmd.Flags().Bool("nowordwrap", false, "Don't wrap words to the next line automatically")
-	runCmd.Flags().String("format", "", "Response format (e.g. json)")
-
 	serveCmd := &cobra.Command{
 		Use:     "serve",
 		Aliases: []string{"start"},
@@ -882,61 +849,13 @@ func NewCLI() *cobra.Command {
 		Args:    cobra.ExactArgs(0),
 		RunE:    RunServer,
 	}
-
-	pullCmd := &cobra.Command{
-		Use:     "pull MODEL",
-		Short:   "Pull a model from a registry",
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    PullHandler,
-	}
-
-	pullCmd.Flags().Bool("insecure", false, "Use an insecure registry")
-
-	pushCmd := &cobra.Command{
-		Use:     "push MODEL",
-		Short:   "Push a model to a registry",
-		Args:    cobra.ExactArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    PushHandler,
-	}
-
-	pushCmd.Flags().Bool("insecure", false, "Use an insecure registry")
-
-	listCmd := &cobra.Command{
-		Use:     "list",
-		Aliases: []string{"ls"},
-		Short:   "List models",
-		PreRunE: checkServerHeartbeat,
-		RunE:    ListHandler,
-	}
-
-	copyCmd := &cobra.Command{
-		Use:     "cp SOURCE TARGET",
-		Short:   "Copy a model",
-		Args:    cobra.ExactArgs(2),
-		PreRunE: checkServerHeartbeat,
-		RunE:    CopyHandler,
-	}
-
-	deleteCmd := &cobra.Command{
-		Use:     "rm MODEL [MODEL...]",
-		Short:   "Remove a model",
-		Args:    cobra.MinimumNArgs(1),
-		PreRunE: checkServerHeartbeat,
-		RunE:    DeleteHandler,
-	}
+	serveCmd.Flags().String("rootfs", "", "Root filesystem for the server")
+	serveCmd.MarkFlagRequired("rootfs")
+	serveCmd.Flags().String("port", "11434", "Port to listen on")
+	serveCmd.MarkFlagRequired("port")
 
 	rootCmd.AddCommand(
 		serveCmd,
-		createCmd,
-		showCmd,
-		runCmd,
-		pullCmd,
-		pushCmd,
-		listCmd,
-		copyCmd,
-		deleteCmd,
 	)
 
 	return rootCmd

@@ -24,7 +24,12 @@ import (
 func setupServer(t *testing.T) (*Server, error) {
 	t.Helper()
 
-	return NewServer()
+	workDir, err := os.MkdirTemp("", "ollama")
+	if err != nil {
+		return nil, err
+	}
+
+	return NewServer(workDir)
 }
 
 func Test_Routes(t *testing.T) {

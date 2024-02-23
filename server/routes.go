@@ -67,7 +67,10 @@ var defaultSessionDuration = 5 * time.Minute
 // load a model into memory if it is not already loaded, it is up to the caller to lock loaded.mu before calling this function
 func load(c *gin.Context, model *Model, opts api.Options, sessionDuration time.Duration) error {
 	workDir := c.GetString("workDir")
+	return loadExt(workDir, model, opts, sessionDuration)
+}
 
+func loadExt(workDir string, model *Model, opts api.Options, sessionDuration time.Duration) error {
 	needLoad := loaded.runner == nil || // is there a model loaded?
 		loaded.ModelPath != model.ModelPath || // has the base model changed?
 		!reflect.DeepEqual(loaded.AdapterPaths, model.AdapterPaths) || // have the adapters changed?
@@ -162,9 +165,6 @@ func GenerateHandler(c *gin.Context) {
 
 	// validate the request
 	switch {
-	case req.Model == "":
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "model is required"})
-		return
 	case len(req.Format) > 0 && req.Format != "json":
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "format must be json"})
 		return
@@ -180,7 +180,7 @@ func GenerateHandler(c *gin.Context) {
 		}
 	}
 
-	model, err := GetModel(req.Model)
+	model, err := GetModel(c.GetString("workDir"))
 	if err != nil {
 		var pErr *fs.PathError
 		if errors.As(err, &pErr) {
@@ -404,7 +404,7 @@ func EmbeddingHandler(c *gin.Context) {
 		return
 	}
 
-	model, err := GetModel(req.Model)
+	model, err := GetModel(c.GetString("workDir"))
 	if err != nil {
 		var pErr *fs.PathError
 		if errors.As(err, &pErr) {
@@ -904,14 +904,9 @@ var defaultAllowOrigins = []string{
 	"0.0.0.0",
 }
 
-func NewServer() (*Server, error) {
-	workDir, err := os.MkdirTemp("", "ollama")
-	if err != nil {
-		return nil, err
-	}
-
+func NewServer(rootfs string) (*Server, error) {
 	return &Server{
-		WorkDir: workDir,
+		WorkDir: rootfs,
 	}, nil
 }
 
@@ -973,7 +968,7 @@ func (s *Server) GenerateRoutes() http.Handler {
 	return r
 }
 
-func Serve(ln net.Listener) error {
+func Serve(ln net.Listener, rootfs string) error {
 	level := slog.LevelInfo
 	if debug := os.Getenv("OLLAMA_DEBUG"); debug != "" {
 		level = slog.LevelDebug
@@ -1010,7 +1005,7 @@ func Serve(ln net.Listener) error {
 		}
 	}
 
-	s, err := NewServer()
+	s, err := NewServer(rootfs)
 	if err != nil {
 		return err
 	}
@@ -1029,13 +1024,22 @@ func Serve(ln net.Listener) error {
 		if loaded.runner != nil {
 			loaded.runner.Close()
 		}
-		os.RemoveAll(s.WorkDir)
+		// XXX: containerd will clean up the rootfs
+		// os.RemoveAll(s.WorkDir)
 		os.Exit(0)
 	}()
 
 	if err := llm.Init(s.WorkDir); err != nil {
 		return fmt.Errorf("unable to initialize llm library %w", err)
 	}
+	model, err := GetModel(s.WorkDir)
+	if err != nil {
+		panic(err)
+	}
+	if err := loadExt(s.WorkDir, model, api.DefaultOptions(), time.Hour); err != nil {
+		panic(err)
+	}
+
 	if runtime.GOOS == "linux" { // TODO - windows too
 		// check compatibility to log warnings
 		if _, err := gpu.CheckVRAM(); err != nil {
@@ -1129,15 +1133,12 @@ func ChatHandler(c *gin.Context) {
 
 	// validate the request
 	switch {
-	case req.Model == "":
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "model is required"})
-		return
 	case len(req.Format) > 0 && req.Format != "json":
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "format must be json"})
 		return
 	}
 
-	model, err := GetModel(req.Model)
+	model, err := GetModel(c.GetString("workDir"))
 	if err != nil {
 		var pErr *fs.PathError
 		if errors.As(err, &pErr) {

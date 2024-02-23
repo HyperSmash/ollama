@@ -152,105 +152,41 @@ func GetManifest(mp ModelPath) (*ManifestV2, string, error) {
 	return manifest, shaStr, nil
 }
 
-func GetModel(name string) (*Model, error) {
-	mp := ParseModelPath(name)
-	manifest, digest, err := GetManifest(mp)
-	if err != nil {
-		return nil, err
-	}
-
+func GetModel(rootfs string) (*Model, error) {
 	model := &Model{
-		Name:      mp.GetFullTagname(),
-		ShortName: mp.GetShortTagname(),
-		Digest:    digest,
-		Template:  "{{ .Prompt }}",
-		License:   []string{},
-		Size:      manifest.GetTotalSize(),
+		Template: "{{ .Prompt }}",
 	}
 
-	filename, err := GetBlobsPath(manifest.Config.Digest)
+	// model
+	model.ModelPath = filepath.Join(rootfs, "model")
+
+	// system
+	bts, err := os.ReadFile(filepath.Join(rootfs, "system"))
 	if err != nil {
 		return nil, err
 	}
 
-	configFile, err := os.Open(filename)
+	model.System = string(bts)
+
+	// params
+	params, err := os.Open(filepath.Join(rootfs, "params"))
 	if err != nil {
 		return nil, err
 	}
-	defer configFile.Close()
+	defer params.Close()
 
-	if err := json.NewDecoder(configFile).Decode(&model.Config); err != nil {
+	// parse model options parameters into a map so that we can see which fields have been specified explicitly
+	if err = json.NewDecoder(params).Decode(&model.Options); err != nil {
 		return nil, err
 	}
 
-	for _, layer := range manifest.Layers {
-		filename, err := GetBlobsPath(layer.Digest)
-		if err != nil {
-			return nil, err
-		}
-
-		switch layer.MediaType {
-		case "application/vnd.ollama.image.model":
-			model.ModelPath = filename
-			model.ParentModel = layer.From
-		case "application/vnd.ollama.image.embed":
-			// Deprecated in versions  > 0.1.2
-			// TODO: remove this warning in a future version
-			slog.Info("WARNING: model contains embeddings, but embeddings in modelfiles have been deprecated and will be ignored.")
-		case "application/vnd.ollama.image.adapter":
-			model.AdapterPaths = append(model.AdapterPaths, filename)
-		case "application/vnd.ollama.image.projector":
-			model.ProjectorPaths = append(model.ProjectorPaths, filename)
-		case "application/vnd.ollama.image.template":
-			bts, err := os.ReadFile(filename)
-			if err != nil {
-				return nil, err
-			}
-
-			model.Template = string(bts)
-		case "application/vnd.ollama.image.system":
-			bts, err := os.ReadFile(filename)
-			if err != nil {
-				return nil, err
-			}
-
-			model.System = string(bts)
-		case "application/vnd.ollama.image.prompt":
-			bts, err := os.ReadFile(filename)
-			if err != nil {
-				return nil, err
-			}
-
-			model.Template = string(bts)
-		case "application/vnd.ollama.image.params":
-			params, err := os.Open(filename)
-			if err != nil {
-				return nil, err
-			}
-			defer params.Close()
-
-			// parse model options parameters into a map so that we can see which fields have been specified explicitly
-			if err = json.NewDecoder(params).Decode(&model.Options); err != nil {
-				return nil, err
-			}
-		case "application/vnd.ollama.image.messages":
-			msgs, err := os.Open(filename)
-			if err != nil {
-				return nil, err
-			}
-			defer msgs.Close()
-
-			if err = json.NewDecoder(msgs).Decode(&model.Messages); err != nil {
-				return nil, err
-			}
-		case "application/vnd.ollama.image.license":
-			bts, err := os.ReadFile(filename)
-			if err != nil {
-				return nil, err
-			}
-			model.License = append(model.License, string(bts))
-		}
+	// template
+	bts, err = os.ReadFile(filepath.Join(rootfs, "template"))
+	if err != nil {
+		return nil, err
 	}
+
+	model.Template = string(bts)
 
 	return model, nil
 }
