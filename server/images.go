@@ -162,31 +162,26 @@ func GetModel(rootfs string) (*Model, error) {
 
 	// system
 	bts, err := os.ReadFile(filepath.Join(rootfs, "system"))
-	if err != nil {
-		return nil, err
+	if err == nil {
+		model.System = string(bts)
 	}
-
-	model.System = string(bts)
 
 	// params
 	params, err := os.Open(filepath.Join(rootfs, "params"))
-	if err != nil {
-		return nil, err
-	}
-	defer params.Close()
+	if err == nil {
+		defer params.Close()
 
-	// parse model options parameters into a map so that we can see which fields have been specified explicitly
-	if err = json.NewDecoder(params).Decode(&model.Options); err != nil {
-		return nil, err
+		// parse model options parameters into a map so that we can see which fields have been specified explicitly
+		if err = json.NewDecoder(params).Decode(&model.Options); err != nil {
+			return nil, err
+		}
 	}
 
 	// template
 	bts, err = os.ReadFile(filepath.Join(rootfs, "template"))
-	if err != nil {
-		return nil, err
+	if err == nil {
+		model.Template = string(bts)
 	}
-
-	model.Template = string(bts)
 
 	return model, nil
 }
