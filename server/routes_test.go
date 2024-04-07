@@ -211,7 +211,11 @@ func Test_Routes(t *testing.T) {
 	}
 
 	s := &Server{}
-	router := s.GenerateRoutes()
+
+	rootfs, err := os.MkdirTemp("", "ollama-test")
+	assert.Nil(t, err)
+	defer os.RemoveAll(rootfs)
+	router := s.GenerateRoutes(rootfs)
 
 	httpSrv := httptest.NewServer(router)
 	t.Cleanup(httpSrv.Close)

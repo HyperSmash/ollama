@@ -169,9 +169,9 @@ func GenerateHandler(c *gin.Context) {
 
 	// validate the request
 	switch {
-	case req.Model == "":
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "model is required"})
-		return
+	// case req.Model == "":
+	// 	c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "model is required"})
+	// 	return
 	case len(req.Format) > 0 && req.Format != "json":
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "format must be json"})
 		return
@@ -187,7 +187,7 @@ func GenerateHandler(c *gin.Context) {
 		}
 	}
 
-	model, err := GetModel(req.Model)
+	model, err := GetModel(c.GetString("rootfs"))
 	if err != nil {
 		var pErr *fs.PathError
 		if errors.As(err, &pErr) {
@@ -437,7 +437,7 @@ func EmbeddingsHandler(c *gin.Context) {
 		return
 	}
 
-	model, err := GetModel(req.Model)
+	model, err := GetModel(c.GetString("rootfs"))
 	if err != nil {
 		var pErr *fs.PathError
 		if errors.As(err, &pErr) {
@@ -1017,7 +1017,7 @@ func allowedHostsMiddleware(addr net.Addr) gin.HandlerFunc {
 	}
 }
 
-func (s *Server) GenerateRoutes() http.Handler {
+func (s *Server) GenerateRoutes(rootfs string) http.Handler {
 	config := cors.DefaultConfig()
 	config.AllowWildcard = true
 	config.AllowBrowserExtensions = true
@@ -1039,6 +1039,10 @@ func (s *Server) GenerateRoutes() http.Handler {
 	r.Use(
 		cors.New(config),
 		allowedHostsMiddleware(s.addr),
+		func(c *gin.Context) {
+			c.Set("rootfs", rootfs)
+			c.Next()
+		},
 	)
 
 	r.POST("/api/pull", PullModelHandler)
@@ -1070,7 +1074,7 @@ func (s *Server) GenerateRoutes() http.Handler {
 	return r
 }
 
-func Serve(ln net.Listener) error {
+func Serve(ln net.Listener, rootfs string) error {
 	level := slog.LevelInfo
 	if debug := os.Getenv("OLLAMA_DEBUG"); debug != "" {
 		level = slog.LevelDebug
@@ -1116,7 +1120,7 @@ func Serve(ln net.Listener) error {
 	}
 
 	s := &Server{addr: ln.Addr()}
-	r := s.GenerateRoutes()
+	r := s.GenerateRoutes(rootfs)
 
 	slog.Info(fmt.Sprintf("Listening on %s (version %s)", ln.Addr(), version.Version))
 	srvr := &http.Server{
@@ -1138,6 +1142,15 @@ func Serve(ln net.Listener) error {
 	if err := llm.Init(); err != nil {
 		return fmt.Errorf("unable to initialize llm library %w", err)
 	}
+
+	model, err := GetModel(rootfs)
+	if err != nil {
+		return fmt.Errorf("unable to get model %w", err)
+	}
+	if err := load(&gin.Context{}, model, api.DefaultOptions(), time.Hour); err != nil {
+		return fmt.Errorf("unable to load model %w", err)
+	}
+
 	if runtime.GOOS == "linux" { // TODO - windows too
 		// check compatibility to log warnings
 		if _, err := gpu.CheckVRAM(); err != nil {
@@ -1231,15 +1244,15 @@ func ChatHandler(c *gin.Context) {
 
 	// validate the request
 	switch {
-	case req.Model == "":
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "model is required"})
-		return
+	// case req.Model == "":
+	// 	c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "model is required"})
+	// 	return
 	case len(req.Format) > 0 && req.Format != "json":
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "format must be json"})
 		return
 	}
 
-	model, err := GetModel(req.Model)
+	model, err := GetModel(c.GetString("rootfs"))
 	if err != nil {
 		var pErr *fs.PathError
 		if errors.As(err, &pErr) {
